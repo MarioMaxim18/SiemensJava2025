@@ -5,6 +5,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.*;
@@ -14,7 +15,7 @@ public class ItemService {
     @Autowired
     private ItemRepository itemRepository;
     private static ExecutorService executor = Executors.newFixedThreadPool(10);
-    private List<Item> processedItems = new ArrayList<>();
+    private  List<Item> processedItems = Collections.synchronizedList(new ArrayList<>()); // wraps the ArrayList in a layer that uses locks (thread-safe)
     private int processedCount = 0;
 
 
@@ -53,13 +54,14 @@ public class ItemService {
      * Examine how errors are handled and propagated
      * Consider the interaction between Spring's @Async and CompletableFuture
      */
-    @Async
-    public List<Item> processItemsAsync() {
-
+    @Async // It only works if you return a CompletableFuture
+    public CompletableFuture<List<Item>> processItemsAsync() {
         List<Long> itemIds = itemRepository.findAllIds();
 
+        List<CompletableFuture<Void>> tasks = new ArrayList<>(); // keep track of all the asynchronous tasks
+
         for (Long id : itemIds) {
-            CompletableFuture.runAsync(() -> {
+            CompletableFuture<Void> task = CompletableFuture.runAsync(() -> {
                 try {
                     Thread.sleep(100);
 
@@ -68,19 +70,25 @@ public class ItemService {
                         return;
                     }
 
-                    processedCount++;
-
                     item.setStatus("PROCESSED");
                     itemRepository.save(item);
                     processedItems.add(item);
 
+                    synchronized (this) {
+                        processedCount++; // count it if the item was actually saved
+                    }
                 } catch (InterruptedException e) {
                     System.out.println("Error: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("Error: " + e.getMessage()); // handle any other exceptions that may occur
                 }
             }, executor);
-        }
 
-        return processedItems;
+            tasks.add(task); // store the task to the list
+        }
+        CompletableFuture<Void> allTasks = CompletableFuture.allOf(tasks.toArray(new CompletableFuture[0]));  // wait for all tasks to complete
+
+        return allTasks.thenApply(v -> processedItems); // return only after all tasks are done
     }
 
 }
