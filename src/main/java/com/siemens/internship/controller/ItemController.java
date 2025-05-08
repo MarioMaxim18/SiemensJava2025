@@ -41,7 +41,10 @@ public class ItemController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Item> updateItem(@PathVariable Long id, @RequestBody Item item) {
+    public ResponseEntity<Item> updateItem(@PathVariable Long id, @Valid @RequestBody Item item, BindingResult result) {
+        if (result.hasErrors()) {
+            return new ResponseEntity<>(HttpStatus.BAD_REQUEST); // return a bad request if any of the required fields are missing
+        }
         Optional<Item> existingItem = itemService.findById(id);
         if (existingItem.isPresent()) {
             item.setId(id); // set the ID of the item to be updated
@@ -49,7 +52,6 @@ public class ItemController {
             return new ResponseEntity<>(newItem, HttpStatus.OK); // return the updated item with OK status
         } else {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND); // return NOT_FOUND if the item does not exist
-
         }
     }
 
